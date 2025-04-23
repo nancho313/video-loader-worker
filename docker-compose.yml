@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  java-app:
+    image: ghcr.io/nancho313/video-loader-worker:1.0.0
+    container_name: java_app
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=${SPRING_DATA_SOURCE_URL}
+      - SPRING_DATASOURCE_USERNAME=${SPRING_DATA_SOURCE_USERNAME}
+      - SPRING_DATASOURCE_PASSWORD=${SPRING_DATA_SOURCE_PASSWORD}
+      - SPRING_RABBITMQ_HOST=${SPRING_RABBITMQ_HOST}
+      - SPRING_RABBITMQ_PORT=${SPRING_RABBITMQ_PORT}
+      - SPRING_RABBITMQ_USERNAME=${SPRING_RABBITMQ_USERNAME}
+      - SPRING_RABBITMQ_PASSWORD=${SPRING_RABBITMQ_PASSWORD}
+      - APP_SERVICEENDPOINT=${APP_SERVICE_ENDPOINT}
+      - APP_FOLDERDIR=${APP_FOLDER_DIR}
+    volumes:
+      - /home/ubuntu/shared_video_loader:${APP_FOLDER_DIR}
