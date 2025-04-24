@@ -2,12 +2,17 @@ package com.github.nancho313.videoloaderworker.business;
 
 import com.github.nancho313.videoloaderworker.contract.messaging.dto.VideoToProcessMessage;
 import com.github.nancho313.videoloaderworker.infrastructure.persistence.dao.VideoRepository;
-import com.github.nancho313.videoloaderworker.infrastructure.persistence.entity.VideoEntity;
+import com.github.nancho313.videoloaderworker.infrastructure.s3.S3Integrator;
 import org.bytedeco.javacv.*;
 import org.bytedeco.opencv.opencv_core.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.NoSuchElementException;
 
@@ -18,46 +23,58 @@ public class VideoService {
 
   private final String folderDir;
 
-  private final String serviceEndpoint;
-
   private final VideoRepository videoRepository;
 
+  private final S3Integrator s3Integrator;
+
   public VideoService(@Value("${app.folder-dir}") String outputDir,
-                      @Value("${app.service-endpoint}") String serviceEndpoint,
-                      VideoRepository videoRepository) {
+                      VideoRepository videoRepository, S3Integrator s3Integrator) {
     this.folderDir = outputDir;
-    this.serviceEndpoint = serviceEndpoint;
     this.videoRepository = videoRepository;
+    this.s3Integrator = s3Integrator;
   }
 
   public void processVideo(VideoToProcessMessage videoToProcess) {
 
-    var video = videoRepository.findById(videoToProcess.videoId()).orElseThrow(() -> new NoSuchElementException("The video to process does not exist."));
-    addImageToVideo(video);
+    String inputFile = "";
+    String outputFile = "";
 
-    video.setProcessedAt(LocalDateTime.now());
-    video.setStatus("PROCESSED");
-    video.setProcessedUrl(serviceEndpoint+"/processed/"+video.getFileName());
-    videoRepository.save(video);
+    try {
+
+      var video = videoRepository.findById(videoToProcess.videoId()).orElseThrow(() -> new NoSuchElementException("The video to process does not exist."));
+      inputFile = s3Integrator.downloadVideo(video.getTitle());
+      outputFile = addImageToVideo(inputFile);
+      var processedUrl = s3Integrator.storeVideo(outputFile, video.getTitle());
+      video.setProcessedUrl(processedUrl);
+      video.setProcessedAt(LocalDateTime.now());
+      video.setStatus("PROCESSED");
+      videoRepository.save(video);
+
+    } catch (Exception e) {
+
+      e.printStackTrace();
+    } finally {
+
+      removeFile(inputFile);
+      removeFile(outputFile);
+    }
   }
 
-  private void addImageToVideo(VideoEntity video) {
+  private String addImageToVideo(String inputFile) {
 
-    String inputVideoPath = folderDir + "/original/" + video.getFileName();
-    String outputVideoPath = folderDir + "/processed/"+ video.getFileName();
     String imagePath = folderDir + "/video_logo.png";
-
+    String outputFile = folderDir + "/" + Instant.now().toEpochMilli() + ".mp4";
     FFmpegFrameGrabber grabber = null;
     FFmpegFrameRecorder recorder = null;
     OpenCVFrameConverter.ToMat converter = null;
 
     try {
 
-      grabber = new FFmpegFrameGrabber(inputVideoPath);
+      grabber = new FFmpegFrameGrabber(inputFile);
       grabber.start();
 
       recorder = new FFmpegFrameRecorder(
-              outputVideoPath,
+              outputFile,
               grabber.getImageWidth(),
               grabber.getImageHeight(),
               grabber.getAudioChannels()
@@ -96,7 +113,7 @@ public class VideoService {
       grabber.stop();
       recorder.stop();
 
-
+      return outputFile;
     } catch (Exception e) {
 
       throw new RuntimeException(e);
@@ -123,7 +140,15 @@ public class VideoService {
           e.printStackTrace();
         }
       }
+    }
+  }
 
+  private void removeFile(String file) {
+
+    try {
+      Files.delete(Path.of(URI.create("file:///"+file)));
+    } catch (IOException e) {
+      e.printStackTrace();
     }
   }
 }
